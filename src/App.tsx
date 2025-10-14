@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { requestNotificationPermission } from "./firebase";
+import { db, requestNotificationPermission } from "./firebase";
+import { collection, addDoc } from "firebase/firestore";
 
 function App() {
   const [time, setTime] = useState("");
@@ -7,10 +8,25 @@ function App() {
   const [token, setToken] = useState("");
 
   const handleRegister = async () => {
-    const fcmToken = await requestNotificationPermission();
-    setToken(fcmToken || "");
-    alert("イベント登録しました！（デモ）");
-  };
+  const fcmToken = await requestNotificationPermission();
+  if (!fcmToken) return;
+
+  // datetime-local の値を JSTのままISO文字列にする
+  const localTime = new Date(time);
+  // 9時間を足す
+  const jstTime = new Date(localTime.getTime() + 9 * 60 * 60 * 1000);
+  const isoJst = jstTime.toISOString(); // ← JST相当のUTC文字列
+
+  await addDoc(collection(db, "events"), {
+    token: fcmToken,
+    time: isoJst,
+    url,
+    sent: false,
+  });
+
+  alert(`イベント登録しました！\n保存時刻: ${isoJst}`);
+  setToken(fcmToken);
+};
 
   return (
     <div style={{ padding: 20 }}>
