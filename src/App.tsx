@@ -10,6 +10,10 @@ import {
   doc,
   updateDoc,
 } from "firebase/firestore";
+import EventList from "./EventList";
+import Modal from "react-bootstrap/Modal";
+import Button from "react-bootstrap/Button";
+import Form from "react-bootstrap/Form";
 
 // Firestoreのイベント型を定義
 type EventData = {
@@ -23,6 +27,16 @@ type EventData = {
 };
 
 function App() {
+    const now = new Date(); // UTC基準のタイムスタンプ
+
+  console.log(
+    "🔍 Checking events - JST:",
+    now.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }),
+    "→ UTC:",
+    now.toISOString()
+  );
+
+
   const [time, setTime] = useState("");
   const [url, setUrl] = useState("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
   const [title, setTitle] = useState("⏰ イベント開始！");
@@ -33,10 +47,12 @@ function App() {
   const [events, setEvents] = useState<EventData[]>([]); // ← 型を指定！ ← Firestore一覧用
 
   // 編集用ステート
+  const [editingEvent, setEditingEvent] = useState<EventData | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTime, setEditTime] = useState("");
   const [editUrl, setEditUrl] = useState("");
 
+  // 🔹 イベント登録
   const handleRegister = async () => {
     if (!time) {
       alert("開始時刻を指定してください。");
@@ -46,7 +62,7 @@ function App() {
     const fcmToken = await requestNotificationPermission();
     if (!fcmToken) return;
 
-    // datetime-local の値を JSTのままISO文字列にする
+    // datetime-localの値をUTCとして保存（標準的なベストプラクティス）
     const localTime = new Date(time);
 
     if (isNaN(localTime.getTime())) {
@@ -54,20 +70,18 @@ function App() {
       return;
     }
 
-    // JSTに変換（9時間足す）
-    const jstTime = new Date(localTime.getTime() + 9 * 60 * 60 * 1000);
-    const isoJst = jstTime.toISOString(); // ← JST相当のUTC文字列
+    const utcTime = localTime.toISOString(); // UTC時刻で保存
 
     await addDoc(collection(db, "events"), {
       token: fcmToken,
-      time: isoJst,
+      time: utcTime,
       url,
       title,
       body,
       sent: false,
     });
 
-    alert(`イベント登録しました！\n保存時刻: ${isoJst}`);
+    alert(`イベント登録しました！\n保存時刻: ${utcTime}`);
     setToken(fcmToken);
   };
 
@@ -95,6 +109,56 @@ function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // 🔹 削除機能
+  const handleDelete = async (id: string) => {
+    const target = events.find((ev) => ev.id === id);
+    const ok = window.confirm(
+      `「${target?.title || "イベント"}」を削除しますか？`
+    );
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, "events", id));
+      alert("削除しました。");
+    } catch (err) {
+      console.error("削除エラー:", err);
+      alert("削除に失敗しました。");
+    }
+  };
+
+  // 🔹 編集機能
+  const handleEdit = (event: EventData) => {
+    // UTC → JST に変換してモーダル表示
+    const utcDate = new Date(event.time);
+    const jstDate = new Date(utcDate.getTime() + 9 * 60 * 60 * 1000);
+
+    setEditingEvent({
+      ...event,
+      time: jstDate.toISOString().slice(0, 16), // datetime-local 用に調整
+    });
+  };
+
+  // 🔹 編集保存処理
+  const handleSaveEdit = async (updated: EventData) => {
+  try {
+    // datetime-local の値をそのまま UTC に変換
+    const isoUtc = new Date(updated.time).toISOString();
+
+    await updateDoc(doc(db, "events", updated.id), {
+      time: isoUtc, // ← UTC (Z付き) で保存される
+      title: updated.title,
+      body: updated.body,
+      url: updated.url,
+      sent: false,
+    });
+
+    alert("更新しました。");
+    setEditingEvent(null);
+  } catch (err) {
+    console.error("更新エラー:", err);
+    alert("更新に失敗しました。");
+  }
+};
 
   return (
     <div style={{ padding: 20 }}>
@@ -149,163 +213,77 @@ function App() {
       )}
 
       {/* ✅ Firestore一覧 */}
-      <h3 style={{ marginTop: 40 }}>登録済みイベント一覧</h3>
-      <table border="1" cellPadding="6" style={{ borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            <th>時刻</th>
-            <th>タイトル</th>
-            <th>本文</th>
-            <th>URL</th>
-            <th>送信済み</th>
-            <th>エラー</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {events.map((ev) => (
-            <tr key={ev.id}>
-              <td>{ev.time}</td>
-              <td>{ev.title}</td>
-              <td>{ev.body}</td>
-              <td>
-                <a href={ev.url} target="_blank" rel="noopener noreferrer">
-                  開く
-                </a>
-              </td>
-              <td>{ev.sent ? "✅" : "⏳"}</td>
-              <td>{ev.error || ""}</td>
-              <td>
-                <button
-                  onClick={() => {
-                    setEditingId(ev.id);
-                    setEditTime(ev.time.slice(0, 16)); // datetime-local 用に整形
-                    setEditUrl(ev.url);
-                  }}
-                  style={{
-                    background: "#3b82f6",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    padding: "4px 8px",
-                    marginRight: "4px",
-                  }}
-                >
-                  編集
-                </button>
-                <button
-                  onClick={async () => {
-                    const ok = window.confirm(
-                      `「${ev.title}」を削除しますか？`
-                    );
-                    if (!ok) return;
-                    try {
-                      await deleteDoc(doc(db, "events", ev.id));
-                      alert("削除しました。");
-                    } catch (err) {
-                      console.error("削除エラー:", err);
-                      alert("削除に失敗しました。");
-                    }
-                  }}
-                  style={{
-                    background: "#ff5555",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    padding: "4px 8px",
-                  }}
-                >
-                  削除
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {editingId && (
-        <div
-          style={{
-            marginTop: "20px",
-            border: "1px solid #ccc",
-            padding: "12px",
-            borderRadius: "8px",
-          }}
-        >
-          <h3>イベントを編集</h3>
+      <EventList events={events} onEdit={handleEdit} onDelete={handleDelete} />
+      {/* 編集モーダル */}
+      <Modal
+        show={!!editingEvent}
+        onHide={() => setEditingEvent(null)}
+        centered
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>イベントを編集</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {editingEvent && (
+            <Form>
+              <Form.Group className="mb-3">
+                <Form.Label>開始時刻</Form.Label>
+                <Form.Control
+                  type="datetime-local"
+                  value={editingEvent.time.slice(0, 16)}
+                  onChange={(e) =>
+                    setEditingEvent({ ...editingEvent, time: e.target.value })
+                  }
+                />
+              </Form.Group>
 
-          <div style={{ marginBottom: "8px" }}>
-            <label>開始時刻</label>
-            <input
-              type="datetime-local"
-              value={editTime}
-              onChange={(e) => setEditTime(e.target.value)}
-            />
-          </div>
+              <Form.Group className="mb-3">
+                <Form.Label>タイトル</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={editingEvent.title}
+                  onChange={(e) =>
+                    setEditingEvent({ ...editingEvent, title: e.target.value })
+                  }
+                />
+              </Form.Group>
 
-          <div style={{ marginBottom: "8px" }}>
-            <label>URL</label>
-            <input
-              type="text"
-              value={editUrl}
-              onChange={(e) => setEditUrl(e.target.value)}
-              style={{ width: "80%" }}
-            />
-          </div>
+              <Form.Group className="mb-3">
+                <Form.Label>本文</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={editingEvent.body}
+                  onChange={(e) =>
+                    setEditingEvent({ ...editingEvent, body: e.target.value })
+                  }
+                />
+              </Form.Group>
 
-          <button
-            onClick={async () => {
-              if (!editTime) {
-                alert("開始時刻を指定してください。");
-                return;
-              }
-              const newTime = new Date(editTime);
-              const jst = new Date(newTime.getTime() + 9 * 60 * 60 * 1000);
-              const isoJst = jst.toISOString();
-
-              try {
-                await updateDoc(doc(db, "events", editingId), {
-                  time: isoJst,
-                  url: editUrl,
-                  sent: false, // 再送対象に戻す
-                });
-                alert("更新しました。");
-                setEditingId(null);
-                setEditTime("");
-                setEditUrl("");
-              } catch (err) {
-                console.error("更新エラー:", err);
-                alert("更新に失敗しました。");
-              }
-            }}
-            style={{
-              background: "#22c55e",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              padding: "6px 10px",
-              marginRight: "8px",
-            }}
+              <Form.Group className="mb-3">
+                <Form.Label>URL</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={editingEvent.url}
+                  onChange={(e) =>
+                    setEditingEvent({ ...editingEvent, url: e.target.value })
+                  }
+                />
+              </Form.Group>
+            </Form>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setEditingEvent(null)}>
+            キャンセル
+          </Button>
+          <Button
+            variant="success"
+            onClick={() => handleSaveEdit(editingEvent!)}
           >
             保存
-          </button>
-
-          <button
-            onClick={() => {
-              setEditingId(null);
-              setEditTime("");
-              setEditUrl("");
-            }}
-            style={{
-              background: "#ccc",
-              border: "none",
-              borderRadius: "4px",
-              padding: "6px 10px",
-            }}
-          >
-            キャンセル
-          </button>
-        </div>
-      )}
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </div>
   );
 }
