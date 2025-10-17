@@ -14,8 +14,10 @@ import EventList from "./EventList";
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
 import Form from "react-bootstrap/Form";
+import Card from "react-bootstrap/Card";
+import Container from "react-bootstrap/Container";
+import { Bell } from "react-bootstrap-icons";
 
-// Firestoreのイベント型を定義
 type EventData = {
   id: string;
   time: string;
@@ -27,72 +29,18 @@ type EventData = {
 };
 
 function App() {
-    const now = new Date(); // UTC基準のタイムスタンプ
-
-  console.log(
-    "🔍 Checking events - JST:",
-    now.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }),
-    "→ UTC:",
-    now.toISOString()
-  );
-
-
   const [time, setTime] = useState("");
   const [url, setUrl] = useState("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
   const [title, setTitle] = useState("⏰ イベント開始！");
   const [body, setBody] = useState("クリックしてコンテンツを開きます");
   const [token, setToken] = useState("");
-
-  // ✅ Firestore一覧用ステート
-  const [events, setEvents] = useState<EventData[]>([]); // ← 型を指定！ ← Firestore一覧用
-
-  // 編集用ステート
+  const [events, setEvents] = useState<EventData[]>([]);
   const [editingEvent, setEditingEvent] = useState<EventData | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editTime, setEditTime] = useState("");
-  const [editUrl, setEditUrl] = useState("");
 
-  // 🔹 イベント登録
-  const handleRegister = async () => {
-    if (!time) {
-      alert("開始時刻を指定してください。");
-      return;
-    }
-
-    const fcmToken = await requestNotificationPermission();
-    if (!fcmToken) return;
-
-    // datetime-localの値をUTCとして保存（標準的なベストプラクティス）
-    const localTime = new Date(time);
-
-    if (isNaN(localTime.getTime())) {
-      alert("無効な日付形式です。");
-      return;
-    }
-
-    const utcTime = localTime.toISOString(); // UTC時刻で保存
-
-    await addDoc(collection(db, "events"), {
-      token: fcmToken,
-      time: utcTime,
-      url,
-      title,
-      body,
-      sent: false,
-    });
-
-    alert(`イベント登録しました！\n保存時刻: ${utcTime}`);
-    setToken(fcmToken);
-  };
-
-  // ✅ Firestoreのリアルタイム監視
+  // 🔹 Firestoreリアルタイム監視
   useEffect(() => {
     const q = query(collection(db, "events"), orderBy("time", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      // const data = snapshot.docs.map((doc) => ({
-      //   id: doc.id,
-      //   ...(doc.data() as Omit<EventData, "id">),
-      // })) as EventData[]; // ← ここでキャスト！
       const data = snapshot.docs.map((doc) => {
         const d = doc.data() as Partial<EventData>;
         return {
@@ -110,110 +58,143 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  // 🔹 削除機能
-  const handleDelete = async (id: string) => {
-    const target = events.find((ev) => ev.id === id);
-    const ok = window.confirm(
-      `「${target?.title || "イベント"}」を削除しますか？`
-    );
-    if (!ok) return;
-    try {
-      await deleteDoc(doc(db, "events", id));
-      alert("削除しました。");
-    } catch (err) {
-      console.error("削除エラー:", err);
-      alert("削除に失敗しました。");
+  // ✅ ページ読み込み時に「現在時刻＋1分」を自動セット
+  useEffect(() => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + 1);
+
+    // ✅ ローカル時刻を datetime-local 用にフォーマット
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    const hour = String(now.getHours()).padStart(2, "0");
+    const minute = String(now.getMinutes()).padStart(2, "0");
+
+    const localDatetime = `${year}-${month}-${day}T${hour}:${minute}`;
+    setTime(localDatetime);
+  }, []);
+
+  // 🔹 イベント登録
+  const handleRegister = async () => {
+    if (!time) {
+      alert("開始時刻を指定してください。");
+      return;
     }
+    const fcmToken = await requestNotificationPermission();
+    if (!fcmToken) return;
+
+    const utcTime = new Date(time).toISOString();
+    await addDoc(collection(db, "events"), {
+      token: fcmToken,
+      time: utcTime,
+      url,
+      title,
+      body,
+      sent: false,
+    });
+
+    alert(`イベント登録しました！\n保存時刻: ${utcTime}`);
+    setToken(fcmToken);
   };
 
-  // 🔹 編集機能
+  // 🔹 編集開始
   const handleEdit = (event: EventData) => {
-    // UTC → JST に変換してモーダル表示
-    const utcDate = new Date(event.time);
-    const jstDate = new Date(utcDate.getTime() + 9 * 60 * 60 * 1000);
-
+    const utcDate = new Date();
+    // JST（UTC+9時間）+ 1分を加算
+    const jstDate = new Date(utcDate.getTime() + 9 * 60 * 60 * 1000 + 60 * 1000);
     setEditingEvent({
       ...event,
-      time: jstDate.toISOString().slice(0, 16), // datetime-local 用に調整
+      time: jstDate.toISOString().slice(0, 16),
     });
   };
 
-  // 🔹 編集保存処理
+  // 🔹 編集保存
   const handleSaveEdit = async (updated: EventData) => {
-  try {
-    // datetime-local の値をそのまま UTC に変換
     const isoUtc = new Date(updated.time).toISOString();
-
     await updateDoc(doc(db, "events", updated.id), {
-      time: isoUtc, // ← UTC (Z付き) で保存される
+      time: isoUtc,
       title: updated.title,
       body: updated.body,
       url: updated.url,
       sent: false,
     });
-
     alert("更新しました。");
     setEditingEvent(null);
-  } catch (err) {
-    console.error("更新エラー:", err);
-    alert("更新に失敗しました。");
-  }
-};
+  };
+
+  // 🔹 削除
+  const handleDelete = async (id: string) => {
+    const target = events.find((ev) => ev.id === id);
+    if (!window.confirm(`「${target?.title || "イベント"}」を削除しますか？`))
+      return;
+    await deleteDoc(doc(db, "events", id));
+    alert("削除しました。");
+  };
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>イベント登録デモ</h2>
-      <p>指定時刻に通知を送って、リンクを開きます。</p>
+    <Container className="py-4">
+      <Card className="shadow-sm mb-4">
+        <Card.Body>
+          <Card.Title className="d-flex align-items-center mb-3">
+            <Bell className="me-2 text-primary" size={22} />
+            イベント登録デモ
+          </Card.Title>
+          <Card.Text className="text-muted mb-3">
+            指定時刻に通知を送り、リンクを開きます。
+          </Card.Text>
 
-      <div>
-        <label>開始時刻（ISO形式）</label>
-        <input
-          type="datetime-local"
-          value={time}
-          onChange={(e) => setTime(e.target.value)}
-        />
-      </div>
+          <Form>
+            <Form.Group className="mb-3">
+              <Form.Label>開始時刻</Form.Label>
+              <Form.Control
+                type="datetime-local"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+              />
+            </Form.Group>
 
-      <div>
-        <label>開くURL</label>
-        <input
-          type="text"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          style={{ width: "80%" }}
-        />
-      </div>
+            <Form.Group className="mb-3">
+              <Form.Label>タイトル</Form.Label>
+              <Form.Control
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </Form.Group>
 
-      <div>
-        <label>通知タイトル</label>
-        <input
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          style={{ width: "80%" }}
-        />
-      </div>
+            <Form.Group className="mb-3">
+              <Form.Label>本文</Form.Label>
+              <Form.Control
+                type="text"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+              />
+            </Form.Group>
 
-      <div>
-        <label>通知本文</label>
-        <input
-          type="text"
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          style={{ width: "80%" }}
-        />
-      </div>
+            <Form.Group className="mb-3">
+              <Form.Label>URL</Form.Label>
+              <Form.Control
+                type="text"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+            </Form.Group>
 
-      <button onClick={handleRegister}>通知を許可して登録</button>
+            <Button variant="primary" onClick={handleRegister}>
+              通知を許可して登録
+            </Button>
+          </Form>
 
-      {token && (
-        <p style={{ marginTop: 20, wordBreak: "break-all" }}>
-          🔑 FCMトークン: {token}
-        </p>
-      )}
+          {token && (
+            <p className="mt-3 small text-muted">
+              🔑 FCMトークン: {token.slice(0, 50)}...
+            </p>
+          )}
+        </Card.Body>
+      </Card>
 
-      {/* ✅ Firestore一覧 */}
       <EventList events={events} onEdit={handleEdit} onDelete={handleDelete} />
+
       {/* 編集モーダル */}
       <Modal
         show={!!editingEvent}
@@ -236,7 +217,6 @@ function App() {
                   }
                 />
               </Form.Group>
-
               <Form.Group className="mb-3">
                 <Form.Label>タイトル</Form.Label>
                 <Form.Control
@@ -247,7 +227,6 @@ function App() {
                   }
                 />
               </Form.Group>
-
               <Form.Group className="mb-3">
                 <Form.Label>本文</Form.Label>
                 <Form.Control
@@ -258,7 +237,6 @@ function App() {
                   }
                 />
               </Form.Group>
-
               <Form.Group className="mb-3">
                 <Form.Label>URL</Form.Label>
                 <Form.Control
@@ -284,7 +262,7 @@ function App() {
           </Button>
         </Modal.Footer>
       </Modal>
-    </div>
+    </Container>
   );
 }
 
