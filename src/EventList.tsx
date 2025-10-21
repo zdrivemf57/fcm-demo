@@ -4,12 +4,30 @@ import Badge from "react-bootstrap/Badge";
 import { Pencil, Trash, Hourglass, CheckCircle, SortDown, SortUp } from "react-bootstrap-icons";
 import { useState } from "react";
 
-function EventList({ events, onEdit, onDelete }: any) {
-  const [showUrl, setShowUrl] = useState(false);
-  const [sortAsc, setSortAsc] = useState(true);
+// EventDataの型定義（App.tsxと共通化が理想）
+interface EventData {
+  id: string;
+  time: string;
+  title: string;
+  body: string;
+  url: string;
+  sent: boolean;
+  error?: string;
+}
 
-  const sortedEvents = showUrl
-    ? [...events].sort((a, b) =>
+// PropsType の型定義
+interface EventListProps {
+  events: EventData[];
+  onEdit: (event: EventData) => void;
+  onDelete: (id: string) => void;
+}
+
+function EventList({ events, onEdit, onDelete }: EventListProps) {
+  const [showUrl, setShowUrl] = useState<boolean>(false);
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
+
+  const sortedEvents: EventData[] = showUrl
+    ? [...events].sort((a: EventData, b: EventData) =>
         sortAsc
           ? (a.url || "").localeCompare(b.url || "")
           : (b.url || "").localeCompare(a.url || "")
@@ -62,7 +80,7 @@ function EventList({ events, onEdit, onDelete }: any) {
               </td>
             </tr>
           ) : (
-            sortedEvents.map((event: any) => (
+            sortedEvents.map((event: EventData) => (
               <tr key={event.id}>
                 <td>{new Date(event.time).toLocaleString()}</td>
                 <td>{event.title}</td>

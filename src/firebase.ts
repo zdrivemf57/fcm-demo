@@ -1,10 +1,21 @@
 import { initializeApp } from "firebase/app";
 import { getMessaging, getToken } from "firebase/messaging";
-import { getFirestore, query, where, getDocs, updateDoc, doc, collection, } from "firebase/firestore";
-import { getAuth } from "firebase/auth"; // ← これを追加
+import { getFirestore, query, where, getDocs, updateDoc, doc, collection,
+  QuerySnapshot } from "firebase/firestore";
+import type { DocumentData } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+
+// Firebase設定の型定義
+interface FirebaseConfig {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  messagingSenderId: string;
+  appId: string;
+}
 
 // Firebase設定
-const firebaseConfig = {
+const firebaseConfig: FirebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
@@ -22,7 +33,7 @@ export const db = getFirestore(app);
 export const auth = getAuth(app); // ← これを追加！
 
 // 通知許可とトークン取得
-export async function requestNotificationPermission() {
+export async function requestNotificationPermission(): Promise<string | undefined> {
   const permission = await Notification.requestPermission();
   if (permission === "granted") {
     const token = await getToken(messaging, {
@@ -32,11 +43,12 @@ export async function requestNotificationPermission() {
     return token;
   } else {
     alert("通知が許可されませんでした");
+    return undefined;
   }
 }
 
 // ✅ トークンの自動更新監視（Firebase v9以降の方法）
-export async function monitorTokenChanges() {
+export async function monitorTokenChanges(): Promise<void> {
   try {
     // 現在のトークンを取得
     const currentToken = await getToken(messaging, {
@@ -52,7 +64,7 @@ export async function monitorTokenChanges() {
 
     // Firestore内の既存トークンを取得
     const q = query(collection(db, "events"), where("token", "!=", currentToken));
-    const snapshot = await getDocs(q);
+    const snapshot: QuerySnapshot<DocumentData> = await getDocs(q);
 
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
