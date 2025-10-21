@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { db, requestNotificationPermission } from "./firebase";
+import {
+  db,
+  requestNotificationPermission,
+  monitorTokenChanges,
+  auth,
+} from "./firebase";
 import {
   collection,
   addDoc,
@@ -9,7 +14,10 @@ import {
   deleteDoc,
   doc,
   updateDoc,
+  where,
+  getDocs,
 } from "firebase/firestore";
+import { useAuthState } from "react-firebase-hooks/auth";
 import EventList from "./EventList";
 import Modal from "react-bootstrap/Modal";
 import Button from "react-bootstrap/Button";
@@ -17,6 +25,7 @@ import Form from "react-bootstrap/Form";
 import Card from "react-bootstrap/Card";
 import Container from "react-bootstrap/Container";
 import { Bell } from "react-bootstrap-icons";
+import NotificationHistory from "./NotificationHistory";
 
 type EventData = {
   id: string;
@@ -29,16 +38,20 @@ type EventData = {
 };
 
 function App() {
-  const [time, setTime] = useState("");
-  const [url, setUrl] = useState("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-  const [title, setTitle] = useState("⏰ イベント開始！");
-  const [body, setBody] = useState("クリックしてコンテンツを開きます");
-  const [token, setToken] = useState("");
+  const [time, setTime] = useState<string>("");
+  const [url, setUrl] = useState<string>("https://...");
+  const [title, setTitle] = useState<string>("⏰ イベント開始！");
+  const [body, setBody] = useState<string>("クリックしてコンテンツを開きます");
+  const [token, setToken] = useState<string>("");
   const [events, setEvents] = useState<EventData[]>([]);
   const [editingEvent, setEditingEvent] = useState<EventData | null>(null);
 
+  // 🔹 Firebase認証ユーザー取得
+  const [user] = useAuthState(auth);
+
   // 🔹 Firestoreリアルタイム監視
   useEffect(() => {
+    monitorTokenChanges();
     const q = query(collection(db, "events"), orderBy("time", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map((doc) => {
@@ -75,7 +88,7 @@ function App() {
   }, []);
 
   // 🔹 イベント登録
-  const handleRegister = async () => {
+const handleRegister = async (): Promise<void> => {
     if (!time) {
       alert("開始時刻を指定してください。");
       return;
@@ -84,6 +97,22 @@ function App() {
     if (!fcmToken) return;
 
     const utcTime = new Date(time).toISOString();
+
+    // 同じトークンと時刻のイベントが存在しないかチェック
+    const snapshot = await getDocs(
+      query(
+        collection(db, "events"),
+        where("token", "==", fcmToken),
+        where("time", "==", utcTime)
+      )
+    );
+
+    if (!snapshot.empty) {
+      alert("同じ時間のイベントがすでに登録されています。");
+      return;
+    }
+
+    // Firestoreに登録
     await addDoc(collection(db, "events"), {
       token: fcmToken,
       time: utcTime,
@@ -101,7 +130,9 @@ function App() {
   const handleEdit = (event: EventData) => {
     const utcDate = new Date();
     // JST（UTC+9時間）+ 1分を加算
-    const jstDate = new Date(utcDate.getTime() + 9 * 60 * 60 * 1000 + 60 * 1000);
+    const jstDate = new Date(
+      utcDate.getTime() + 9 * 60 * 60 * 1000 + 60 * 1000
+    );
     setEditingEvent({
       ...event,
       time: jstDate.toISOString().slice(0, 16),
@@ -194,6 +225,12 @@ function App() {
       </Card>
 
       <EventList events={events} onEdit={handleEdit} onDelete={handleDelete} />
+
+      {user ? (
+        <NotificationHistory userId={user.uid} />
+      ) : (
+        <p>ログインしてください。</p>
+      )}
 
       {/* 編集モーダル */}
       <Modal
