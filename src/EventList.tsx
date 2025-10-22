@@ -3,24 +3,7 @@ import Button from "react-bootstrap/Button";
 import Badge from "react-bootstrap/Badge";
 import { Pencil, Trash, Hourglass, CheckCircle, SortDown, SortUp } from "react-bootstrap-icons";
 import { useState } from "react";
-
-// EventDataの型定義（App.tsxと共通化が理想）
-interface EventData {
-  id: string;
-  time: string;
-  title: string;
-  body: string;
-  url: string;
-  sent: boolean;
-  error?: string;
-}
-
-// PropsType の型定義
-interface EventListProps {
-  events: EventData[];
-  onEdit: (event: EventData) => void;
-  onDelete: (id: string) => void;
-}
+import type { EventData, EventListProps } from "./types/types";
 
 function EventList({ events, onEdit, onDelete }: EventListProps) {
   const [showUrl, setShowUrl] = useState<boolean>(false);

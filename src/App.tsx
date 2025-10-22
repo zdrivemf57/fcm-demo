@@ -1,22 +1,12 @@
 import { useEffect, useState } from "react";
 import {
-  db,
   requestNotificationPermission,
   monitorTokenChanges,
   auth,
+  messaging,
 } from "./firebase";
-import {
-  collection,
-  addDoc,
-  onSnapshot,
-  query,
-  orderBy,
-  deleteDoc,
-  doc,
-  updateDoc,
-  where,
-  getDocs,
-} from "firebase/firestore";
+import { onMessage } from "firebase/messaging";
+import { signInAnonymously } from "firebase/auth";
 import { useAuthState } from "react-firebase-hooks/auth";
 import EventList from "./EventList";
 import Modal from "react-bootstrap/Modal";
@@ -25,51 +15,100 @@ import Form from "react-bootstrap/Form";
 import Card from "react-bootstrap/Card";
 import Container from "react-bootstrap/Container";
 import { Bell } from "react-bootstrap-icons";
+import type { EventData, EventInput } from "./types/types";
+// import NotificationHistory from "./NotificationHistory"; // 一時的に無効
+import { eventOperations, migrateEventData } from "./utils/firestore";
 import NotificationHistory from "./NotificationHistory";
 
-type EventData = {
-  id: string;
-  time: string;
-  title: string;
-  body: string;
-  url: string;
-  sent: boolean;
-  error?: string;
-};
-
 function App() {
-  const [time, setTime] = useState<string>("");
-  const [url, setUrl] = useState<string>("https://...");
-  const [title, setTitle] = useState<string>("⏰ イベント開始！");
-  const [body, setBody] = useState<string>("クリックしてコンテンツを開きます");
-  const [token, setToken] = useState<string>("");
+  const [time, setTime] = useState("");
+  const [url, setUrl] = useState("https://...");
+  const [title, setTitle] = useState("⏰ イベント開始！");
+  const [body, setBody] = useState("クリックしてコンテンツを開きます");
+  const [token, setToken] = useState("");
   const [events, setEvents] = useState<EventData[]>([]);
   const [editingEvent, setEditingEvent] = useState<EventData | null>(null);
 
   // 🔹 Firebase認証ユーザー取得
   const [user] = useAuthState(auth);
 
-  // 🔹 Firestoreリアルタイム監視
+  // 🔹 初回レンダリング時に匿名ログインを試行
   useEffect(() => {
-    monitorTokenChanges();
-    const q = query(collection(db, "events"), orderBy("time", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map((doc) => {
-        const d = doc.data() as Partial<EventData>;
-        return {
-          id: doc.id,
-          time: d.time ?? "",
-          title: d.title ?? "",
-          body: d.body ?? "",
-          url: d.url ?? "",
-          sent: d.sent ?? false,
-          error: d.error ?? "",
-        };
-      });
-      setEvents(data);
-    });
-    return () => unsubscribe();
+    const signIn = async () => {
+      try {
+        if (!auth.currentUser) {
+          await signInAnonymously(auth);
+          console.log("✅ 匿名ログイン成功");
+        }
+      } catch (error) {
+        console.error("匿名ログイン失敗:", error);
+      }
+    };
+    signIn();
   }, []);
+
+  // 🔹 Firestoreリアルタイム監視とメッセージ受信
+  useEffect(() => {
+    const initializeApp = async () => {
+      try {
+        // 一時的に認証機能をスキップ
+        console.log("� 認証なしモードで初期化中...");
+
+        // データマイグレーションを実行
+        await migrateEventData();
+
+        // 通常の初期化処理
+        monitorTokenChanges();
+
+        console.log("✅ 初期化完了");
+      } catch (error) {
+        console.error("アプリ初期化エラー:", error);
+      }
+    };
+
+    initializeApp();
+
+    // 型安全なリアルタイム監視を使用
+    const unsubscribe = eventOperations.onSnapshot((events) => {
+      setEvents(events);
+    });
+
+    // フォアグラウンドでのメッセージ受信処理
+    const unsubscribeMessage = onMessage(messaging, (payload) => {
+      console.log("📩 フォアグラウンド通知を受信:", payload);
+
+      try {
+        const { title, body } = payload.notification || {};
+        const url = payload?.fcmOptions?.link || payload?.data?.url;
+
+        if (title && body) {
+          // ブラウザ通知を表示
+          if (Notification.permission === "granted") {
+            const notification = new Notification(title, {
+              body,
+              icon: "/pwa-192x192.png",
+              data: { url },
+            });
+
+            // 通知クリック時の処理
+            notification.onclick = () => {
+              if (url) {
+                window.open(url, "_blank");
+              }
+              notification.close();
+            };
+          }
+        }
+      } catch (error) {
+        console.error("フォアグラウンド通知処理エラー:", error);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeMessage();
+    };
+  }, []); // 認証に依存しないため空の依存配列
 
   // ✅ ページ読み込み時に「現在時刻＋1分」を自動セット
   useEffect(() => {
@@ -88,7 +127,7 @@ function App() {
   }, []);
 
   // 🔹 イベント登録
-const handleRegister = async (): Promise<void> => {
+  const handleRegister = async (): Promise<void> => {
     if (!time) {
       alert("開始時刻を指定してください。");
       return;
@@ -98,36 +137,27 @@ const handleRegister = async (): Promise<void> => {
 
     const utcTime = new Date(time).toISOString();
 
-    // 同じトークンと時刻のイベントが存在しないかチェック
-    const snapshot = await getDocs(
-      query(
-        collection(db, "events"),
-        where("token", "==", fcmToken),
-        where("time", "==", utcTime)
-      )
-    );
+    try {
+      const eventInput: EventInput = {
+        time: utcTime,
+        title: title.trim(),
+        body: body.trim(),
+        url: url.trim(),
+      };
 
-    if (!snapshot.empty) {
-      alert("同じ時間のイベントがすでに登録されています。");
-      return;
+      // 型安全なイベント作成
+      const eventId = await eventOperations.create(eventInput, user?.uid);
+
+      alert(`イベント登録しました！\nID: ${eventId}\n保存時刻: ${utcTime}`);
+      setToken(fcmToken);
+    } catch (error) {
+      console.error("イベント登録エラー:", error);
+      alert("イベントの登録に失敗しました");
     }
-
-    // Firestoreに登録
-    await addDoc(collection(db, "events"), {
-      token: fcmToken,
-      time: utcTime,
-      url,
-      title,
-      body,
-      sent: false,
-    });
-
-    alert(`イベント登録しました！\n保存時刻: ${utcTime}`);
-    setToken(fcmToken);
   };
 
   // 🔹 編集開始
-  const handleEdit = (event: EventData) => {
+  const handleEdit = (event: EventData): void => {
     const utcDate = new Date();
     // JST（UTC+9時間）+ 1分を加算
     const jstDate = new Date(
@@ -140,26 +170,37 @@ const handleRegister = async (): Promise<void> => {
   };
 
   // 🔹 編集保存
-  const handleSaveEdit = async (updated: EventData) => {
-    const isoUtc = new Date(updated.time).toISOString();
-    await updateDoc(doc(db, "events", updated.id), {
-      time: isoUtc,
-      title: updated.title,
-      body: updated.body,
-      url: updated.url,
-      sent: false,
-    });
-    alert("更新しました。");
-    setEditingEvent(null);
+  const handleSaveEdit = async (updated: EventData): Promise<void> => {
+    try {
+      const eventInput: Partial<EventInput> = {
+        time: new Date(updated.time).toISOString(),
+        title: updated.title,
+        body: updated.body,
+        url: updated.url,
+      };
+
+      await eventOperations.update(updated.id, eventInput);
+      alert("更新しました。");
+      setEditingEvent(null);
+    } catch (error) {
+      console.error("更新エラー:", error);
+      alert("更新に失敗しました");
+    }
   };
 
   // 🔹 削除
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string): Promise<void> => {
     const target = events.find((ev) => ev.id === id);
     if (!window.confirm(`「${target?.title || "イベント"}」を削除しますか？`))
       return;
-    await deleteDoc(doc(db, "events", id));
-    alert("削除しました。");
+
+    try {
+      await eventOperations.delete(id);
+      alert("削除しました。");
+    } catch (error) {
+      console.error("削除エラー:", error);
+      alert("削除に失敗しました");
+    }
   };
 
   return (
@@ -226,10 +267,20 @@ const handleRegister = async (): Promise<void> => {
 
       <EventList events={events} onEdit={handleEdit} onDelete={handleDelete} />
 
+      {/* 通知履歴機能は Firebase Authentication 設定後に有効化予定 */}
       {user ? (
         <NotificationHistory userId={user.uid} />
       ) : (
-        <p>ログインしてください。</p>
+        <Card className="mt-4">
+          <Card.Body className="text-center py-4">
+            <div
+              className="spinner-border spinner-border-sm me-2"
+              role="status"
+              aria-hidden="true"
+            ></div>
+            <span className="text-muted">初期化中...</span>
+          </Card.Body>
+        </Card>
       )}
 
       {/* 編集モーダル */}

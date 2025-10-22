@@ -4,15 +4,7 @@ import { getFirestore, query, where, getDocs, updateDoc, doc, collection,
   QuerySnapshot } from "firebase/firestore";
 import type { DocumentData } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
-
-// Firebase設定の型定義
-interface FirebaseConfig {
-  apiKey: string;
-  authDomain: string;
-  projectId: string;
-  messagingSenderId: string;
-  appId: string;
-}
+import type { FirebaseConfig } from "./types/types";
 
 // Firebase設定
 const firebaseConfig: FirebaseConfig = {
@@ -34,15 +26,20 @@ export const auth = getAuth(app); // ← これを追加！
 
 // 通知許可とトークン取得
 export async function requestNotificationPermission(): Promise<string | undefined> {
-  const permission = await Notification.requestPermission();
-  if (permission === "granted") {
-    const token = await getToken(messaging, {
-      vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
-    });
-    console.log("🔑 通知トークン:", token);
-    return token;
-  } else {
-    alert("通知が許可されませんでした");
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      const token = await getToken(messaging, {
+        vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+      });
+      console.log("🔑 通知トークン:", token);
+      return token;
+    } else {
+      console.warn("⚠️ 通知が許可されませんでした");
+      return undefined;
+    }
+  } catch (error) {
+    console.error("❌ 通知許可エラー:", error);
     return undefined;
   }
 }
