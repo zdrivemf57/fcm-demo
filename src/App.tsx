@@ -278,7 +278,7 @@ function App() {
               role="status"
               aria-hidden="true"
             ></div>
-            <span className="text-muted">初期化中...</span>
+            <span className="text-muted">🔐 ログイン中です...</span>
           </Card.Body>
         </Card>
       )}
