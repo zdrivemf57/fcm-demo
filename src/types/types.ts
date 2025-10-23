@@ -7,7 +7,7 @@ import type { Timestamp } from "firebase/firestore";
 
 // Firestoreに保存される生のイベントデータ
 export interface EventDataFirestore {
-  time: Timestamp;  // Firestoreでは Timestamp オブジェクト
+  time: string; // ✅ Timestamp → string に変更
   title: string;
   body: string;
   url: string;

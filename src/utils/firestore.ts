@@ -65,6 +65,18 @@ export const stringToTimestamp = (dateString: string): Timestamp => {
   return Timestamp.fromDate(new Date(dateString));
 };
 
+// 日時文字列を標準ISO形式にフォーマット
+export const formatToISOString = (dateString: string): string => {
+  const date = new Date(dateString);
+  return date.toISOString(); // 2025-10-23T02:54:00.006Z形式
+};
+
+// 文字列をフォーマット後にTimestampに変換
+export const stringToFormattedTimestamp = (dateString: string): Timestamp => {
+  const formattedString = formatToISOString(dateString);
+  return Timestamp.fromDate(new Date(formattedString));
+};
+
 // ==========================================
 // Document Conversion Helpers
 // ==========================================
@@ -92,7 +104,7 @@ export const convertEventFromFirestore = (
 
   return {
     id: doc.id,
-    time: timestampToString(data.time),
+    time: data.time || "", // 既に文字列なのでそのまま使用
     title: data.title || "",
     body: data.body || "",
     url: data.url || "",
@@ -110,9 +122,11 @@ export const convertEventToFirestore = (
   userId?: string
 ): ToFirestore<EventDataFirestore> => {
   const now = Timestamp.now();
+  const formattedTimeString = formatToISOString(input.time);
+  console.log('📅 フォーマット済み時刻:', formattedTimeString);
 
   return {
-    time: stringToTimestamp(input.time),
+    time: formattedTimeString,
     title: input.title,
     body: input.body,
     url: input.url,
@@ -216,9 +230,10 @@ export const eventOperations = {
     if (updates.body !== undefined) updateData.body = updates.body;
     if (updates.url !== undefined) updateData.url = updates.url;
 
-    // time フィールドの変換
+    // time フィールドの変換（文字列 → フォーマット済み文字列）
     if (updates.time) {
-      updateData.time = stringToTimestamp(updates.time);
+      updateData.time = formatToISOString(updates.time);
+      console.log('🔄 更新時のフォーマット済み時刻:', updateData.time);
     }
 
     await updateDoc(doc(db, "events", id), updateData);
