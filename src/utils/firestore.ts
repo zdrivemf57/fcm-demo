@@ -109,6 +109,7 @@ export const convertEventFromFirestore = (
     body: data.body || "",
     url: data.url || "",
     sent: data.sent || false,
+    token: data.token,
     error: data.error,
     createdAt: timestampToString(data.createdAt),
     updatedAt: timestampToString(data.updatedAt),
@@ -119,7 +120,8 @@ export const convertEventFromFirestore = (
 // EventInputをFirestore用データに変換（安全版）
 export const convertEventToFirestore = (
   input: EventInput,
-  userId?: string
+  userId?: string,
+  token?: string
 ): ToFirestore<EventDataFirestore> => {
   const now = Timestamp.now();
   const formattedTimeString = formatToISOString(input.time);
@@ -131,6 +133,7 @@ export const convertEventToFirestore = (
     body: input.body,
     url: input.url,
     sent: false,
+    token: token || "", // FCMトークンを保存
     createdAt: now,
     updatedAt: now,
     userId
@@ -166,7 +169,8 @@ export const convertNotificationFromFirestore = (
     status: data.status || "scheduled",
     read: data.read || false,
     token: data.token,
-    createdAt: timestampToString(data.createdAt)
+    // createdAt がない場合は sentAt を使用、それもない場合は空文字
+    createdAt: timestampToString(data.createdAt) || timestampToString(data.sentAt) || ""
   };
 };
 
@@ -213,29 +217,33 @@ export const migrateEventData = async (): Promise<void> => {
 // イベント操作
 export const eventOperations = {
   // イベント作成
-  async create(eventInput: EventInput, userId?: string): Promise<string> {
-    const eventData = convertEventToFirestore(eventInput, userId);
+  async create(eventInput: EventInput, userId?: string, token?: string): Promise<string> {
+    const eventData = convertEventToFirestore(eventInput, userId, token);
     const docRef = await addDoc(collection(db, "events"), eventData);
     return docRef.id;
   },
 
   // イベント更新
   async update(id: string, updates: Partial<EventInput>): Promise<void> {
+    console.log('🔍 受信した更新データ:', updates);
+
     const updateData: Partial<EventDataFirestore> = {
       updatedAt: Timestamp.now()
     };
 
-    // 文字列フィールドのコピー
+    // 型安全なフィールドコピー
     if (updates.title !== undefined) updateData.title = updates.title;
     if (updates.body !== undefined) updateData.body = updates.body;
     if (updates.url !== undefined) updateData.url = updates.url;
+    if (updates.sent !== undefined) updateData.sent = updates.sent;
 
-    // time フィールドの変換（文字列 → フォーマット済み文字列）
+    // time フィールドは特別処理（フォーマット変換）
     if (updates.time) {
       updateData.time = formatToISOString(updates.time);
-      console.log('🔄 更新時のフォーマット済み時刻:', updateData.time);
     }
 
+    console.log('🔄 更新時のデータ:', updateData);
+    console.log('📝 Firestoreに送信されるフィールド数:', Object.keys(updateData).length);
     await updateDoc(doc(db, "events", id), updateData);
   },
 
@@ -341,11 +349,14 @@ export const notificationOperations = {
   onSnapshot(userId: string, callback: (notifications: NotificationData[]) => void): () => void {
     const q = query(
       collection(db, "users", userId, "notifications"),
-      orderBy("createdAt", "desc")
+      orderBy("sentAt", "desc")
     );
+    
     return onSnapshot(q, (snapshot) => {
       const notifications = snapshot.docs.map(convertNotificationFromFirestore);
       callback(notifications);
+    }, (error) => {
+      console.error("通知監視エラー:", error);
     });
   }
 };

@@ -7,15 +7,16 @@ import type { Timestamp } from "firebase/firestore";
 
 // Firestoreに保存される生のイベントデータ
 export interface EventDataFirestore {
-  time: string; // ✅ Timestamp → string に変更
+  time: string;                // 通知予定時刻（UTC ISO文字列）
   title: string;
   body: string;
   url: string;
-  sent: boolean;
+  sent: boolean;               // 送信済みフラグ
+  token: string;               // 🔑 通知対象デバイスの FCM トークン ← 重要！
   error?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
-  userId?: string;  // ユーザーIDを追加
+  userId?: string;             // ユーザーID（匿名ログイン含む）
 }
 
 // アプリケーションで使用するイベントデータ（Timestamp → string変換済み）
@@ -26,6 +27,7 @@ export interface EventData {
   body: string;
   url: string;
   sent: boolean;
+  token?: string;              // FCMトークン（履歴追跡用）
   error?: string;
   createdAt: string;
   updatedAt: string;
@@ -100,6 +102,7 @@ export interface EventInput {
   title: string;
   body: string;
   url: string;
+  sent?: boolean; // 送信状態（編集時に使用）
 }
 
 // 通知作成用の入力データ

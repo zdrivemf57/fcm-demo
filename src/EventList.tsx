@@ -7,15 +7,51 @@ import type { EventData, EventListProps } from "./types/types";
 
 function EventList({ events, onEdit, onDelete }: EventListProps) {
   const [showUrl, setShowUrl] = useState<boolean>(false);
-  const [sortAsc, setSortAsc] = useState<boolean>(true);
+  const [sortField, setSortField] = useState<string>("time");
+  const [sortAsc, setSortAsc] = useState<boolean>(false); // 時刻は降順（新しい順）がデフォルト
 
-  const sortedEvents: EventData[] = showUrl
-    ? [...events].sort((a: EventData, b: EventData) =>
-        sortAsc
-          ? (a.url || "").localeCompare(b.url || "")
-          : (b.url || "").localeCompare(a.url || "")
-      )
-    : events;
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+  };
+
+  const sortedEvents: EventData[] = [...events].sort((a: EventData, b: EventData) => {
+    let aValue: any;
+    let bValue: any;
+
+    switch (sortField) {
+      case "time":
+        aValue = new Date(a.time);
+        bValue = new Date(b.time);
+        break;
+      case "title":
+        aValue = a.title || "";
+        bValue = b.title || "";
+        break;
+      case "body":
+        aValue = a.body || "";
+        bValue = b.body || "";
+        break;
+      case "url":
+        aValue = a.url || "";
+        bValue = b.url || "";
+        break;
+      case "sent":
+        aValue = a.sent ? 1 : 0;
+        bValue = b.sent ? 1 : 0;
+        break;
+      default:
+        return 0;
+    }
+
+    if (aValue < bValue) return sortAsc ? -1 : 1;
+    if (aValue > bValue) return sortAsc ? 1 : -1;
+    return 0;
+  });
 
   return (
     <div className="mt-4">
@@ -33,9 +69,48 @@ function EventList({ events, onEdit, onDelete }: EventListProps) {
       <Table striped bordered hover responsive className="align-middle">
         <thead className="table-light">
           <tr>
-            <th>開始時刻</th>
-            <th>タイトル</th>
-            <th>本文</th>
+            <th className="text-nowrap">
+              開始時刻{" "}
+              <Button
+                variant="link"
+                size="sm"
+                className="p-0 align-baseline"
+                onClick={() => handleSort("time")}
+                title="開始時刻で並び替え"
+              >
+                <span className={sortField === "time" ? "text-primary" : "text-muted"}>
+                  {sortField === "time" ? (sortAsc ? <SortUp /> : <SortDown />) : <SortDown />}
+                </span>
+              </Button>
+            </th>
+            <th className="text-nowrap">
+              タイトル{" "}
+              <Button
+                variant="link"
+                size="sm"
+                className="p-0 align-baseline"
+                onClick={() => handleSort("title")}
+                title="タイトルで並び替え"
+              >
+                <span className={sortField === "title" ? "text-primary" : "text-muted"}>
+                  {sortField === "title" ? (sortAsc ? <SortUp /> : <SortDown />) : <SortDown />}
+                </span>
+              </Button>
+            </th>
+            <th className="text-nowrap">
+              本文{" "}
+              <Button
+                variant="link"
+                size="sm"
+                className="p-0 align-baseline"
+                onClick={() => handleSort("body")}
+                title="本文で並び替え"
+              >
+                <span className={sortField === "body" ? "text-primary" : "text-muted"}>
+                  {sortField === "body" ? (sortAsc ? <SortUp /> : <SortDown />) : <SortDown />}
+                </span>
+              </Button>
+            </th>
             {showUrl && (
               <th className="text-nowrap">
                 URL{" "}
@@ -43,14 +118,29 @@ function EventList({ events, onEdit, onDelete }: EventListProps) {
                   variant="link"
                   size="sm"
                   className="p-0 align-baseline"
-                  onClick={() => setSortAsc(!sortAsc)}
+                  onClick={() => handleSort("url")}
                   title="URLで並び替え"
                 >
-                  {sortAsc ? <SortDown /> : <SortUp />}
+                  <span className={sortField === "url" ? "text-primary" : "text-muted"}>
+                    {sortField === "url" ? (sortAsc ? <SortUp /> : <SortDown />) : <SortDown />}
+                  </span>
                 </Button>
               </th>
             )}
-            <th>状態</th>
+            <th className="text-nowrap">
+              状態{" "}
+              <Button
+                variant="link"
+                size="sm"
+                className="p-0 align-baseline"
+                onClick={() => handleSort("sent")}
+                title="状態で並び替え"
+              >
+                <span className={sortField === "sent" ? "text-primary" : "text-muted"}>
+                  {sortField === "sent" ? (sortAsc ? <SortUp /> : <SortDown />) : <SortDown />}
+                </span>
+              </Button>
+            </th>
             <th>操作</th>
           </tr>
         </thead>

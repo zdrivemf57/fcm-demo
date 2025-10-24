@@ -16,7 +16,6 @@ import Card from "react-bootstrap/Card";
 import Container from "react-bootstrap/Container";
 import { Bell } from "react-bootstrap-icons";
 import type { EventData, EventInput } from "./types/types";
-// import NotificationHistory from "./NotificationHistory"; // 一時的に無効
 import { eventOperations, migrateEventData } from "./utils/firestore";
 import NotificationHistory from "./NotificationHistory";
 
@@ -32,7 +31,7 @@ function App() {
   // 🔹 Firebase認証ユーザー取得
   const [user] = useAuthState(auth);
 
-  // 🔹 初回レンダリング時に匿名ログインを試行
+  // � 初回レンダリング時に匿名ログインを試行
   useEffect(() => {
     const signIn = async () => {
       try {
@@ -51,11 +50,15 @@ function App() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        // 一時的に認証機能をスキップ
-        console.log("� 認証なしモードで初期化中...");
+        console.log("🔧 認証状態確認済み - 初期化中...");
 
-        // データマイグレーションを実行
-        await migrateEventData();
+        // 認証済みユーザーのみデータマイグレーションを実行
+        if (user) {
+          console.log("👤 認証済みユーザーでデータマイグレーション実行");
+          await migrateEventData();
+        } else {
+          console.log("⏳ 認証待機中 - データマイグレーションをスキップ");
+        }
 
         // 通常の初期化処理
         monitorTokenChanges();
@@ -66,12 +69,23 @@ function App() {
       }
     };
 
-    initializeApp();
+    // 認証状態が確定してから初期化実行
+    if (user !== undefined) {
+      initializeApp();
+    }
 
-    // 型安全なリアルタイム監視を使用
-    const unsubscribe = eventOperations.onSnapshot((events) => {
-      setEvents(events);
-    });
+    // 型安全なリアルタイム監視を使用（認証済みの場合のみ）
+    let unsubscribe: (() => void) | undefined;
+    if (user) {
+      console.log("📡 認証済みユーザーでイベント監視開始");
+      unsubscribe = eventOperations.onSnapshot((events) => {
+        console.log("📊 イベント監視 - 受信データ件数:", events.length);
+        setEvents(events);
+      });
+    } else {
+      console.log("⏳ 未認証のためイベント監視をスキップ");
+      setEvents([]); // 未認証時は空配列
+    }
 
     // フォアグラウンドでのメッセージ受信処理
     const unsubscribeMessage = onMessage(messaging, (payload) => {
@@ -105,10 +119,13 @@ function App() {
     });
 
     return () => {
-      unsubscribe();
+      if (unsubscribe) {
+        console.log("🔌 イベント監視を停止");
+        unsubscribe();
+      }
       unsubscribeMessage();
     };
-  }, []); // 認証に依存しないため空の依存配列
+  }, [user]); // ユーザー状態変化を監視
 
   // ✅ ページ読み込み時に「現在時刻＋1分」を自動セット
   useEffect(() => {
@@ -145,8 +162,8 @@ function App() {
         url: url.trim(),
       };
 
-      // 型安全なイベント作成
-      const eventId = await eventOperations.create(eventInput, user?.uid);
+      // 型安全なイベント作成（FCMトークンも保存）
+      const eventId = await eventOperations.create(eventInput, user?.uid, fcmToken);
 
       alert(`イベント登録しました！\nID: ${eventId}\n保存時刻: ${utcTime}`);
       setToken(fcmToken);
@@ -177,8 +194,10 @@ function App() {
         title: updated.title,
         body: updated.body,
         url: updated.url,
+        sent: false
       };
 
+      console.log('📝 App.tsx - 送信するイベントデータ:', eventInput);
       await eventOperations.update(updated.id, eventInput);
       alert("更新しました。");
       setEditingEvent(null);
@@ -267,9 +286,21 @@ function App() {
 
       <EventList events={events} onEdit={handleEdit} onDelete={handleDelete} />
 
-      {/* 通知履歴機能は Firebase Authentication 設定後に有効化予定 */}
+      {/* 通知履歴機能は Firebase Authentication 設定後に有効化 */}
       {user ? (
-        <NotificationHistory userId={user.uid} />
+        <div>
+          <Card className="mt-4 mb-3">
+            <Card.Body>
+              <Card.Title className="h6 mb-2">🔐 ユーザー情報</Card.Title>
+              <div className="small text-muted">
+              <div><strong>User ID:</strong> {user.uid}</div>
+              <div><strong>匿名ユーザー:</strong> {user.isAnonymous ? "はい" : "いいえ"}</div>
+              <div><strong>メール:</strong> {user.email || "未設定"}</div>
+            </div>
+            </Card.Body>
+          </Card>
+          <NotificationHistory userId={user.uid} />
+        </div>
       ) : (
         <Card className="mt-4">
           <Card.Body className="text-center py-4">
